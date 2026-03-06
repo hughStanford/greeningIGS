@@ -1,0 +1,108 @@
+### code for preparing data for running Equation 3
+
+library(pacman)
+
+p_load(tidyverse, arrow)
+
+# 1. Establish recuring variables ------------------------------------------------
+
+base_path <- "[insert_filepath]"
+infile <- file.path(base_path, "processed_data")
+
+targetType <- c("rail", "util", "utilAndRail")
+
+old_lga_names <- c(
+  'Yarra', 'Stonnington', 'Whitehorse', 'Port Phillip',
+  'Merri-bek', 'Moonee Valley', 'Monash','Melbourne',
+  'Maroondah', 'Maribyrnong', 'Knox', 'Kingston (Vic.)',
+  'Hobsons Bay', 'Greater Dandenong','Glen Eira', 'Darebin',
+  'Brimbank', 'Boroondara','Bayside (Vic.)', 'Banyule', 'Manningham'
+)
+new_lga_names <- c(
+  'YARRA', 'STONNINGTON', 'WHITEHORSE', 'PORT PHILLIP',
+  'MORELAND', 'MOONEE VALLEY', 'MONASH','MELBOURNE',
+  'MAROONDAH', 'MARIBYRNONG', 'KNOX', 'KINGSTON',
+  'HOBSONS BAY', 'GREATER DANDENONG','GLEN EIRA', 'DAREBIN',
+  'BRIMBANK', 'BOROONDARA','BAYSIDE', 'BANYULE', 'MANNINGHAM'
+)
+name_map <- setNames(new_lga_names, old_lga_names)
+
+load_per_easement <- function(filename, targetType1, ...) {
+  # Collect all non-NULL target types
+  target_types <- c(targetType1, list(...))
+  target_types <- unlist(target_types)  # Flatten the list
+  target_types <- target_types[!is.na(target_types)]  # Remove NAs
+  # Function to read and process a single file
+  read_process <- function(target) {
+    read_parquet(file.path(infile, "modelVariables",
+                       sprintf("%s_%s.parquet",
+                               filename,
+                               target))) %>% 
+      mutate(area_name = name_map[lgaName25],
+             targetType = target) %>% 
+      dplyr::select(-c(lgaName25))
+  }
+  # Read all files and bind
+  lapply(target_types, read_process) %>% 
+    bind_rows()
+}
+
+# 2. Load and organise input data ------------------------------------------------------
+
+delta_eff_mesh <- read_parquet(
+  file.path(infile, "modelVariables", "delta_eff_mesh.parquet"))
+
+total_habitat_change <- read_parquet(
+  file.path(infile, "modelVariables", "total_habitat_change.parquet"))
+
+ease_ap_ratio <- load_per_easement(filename = "easement_areaPerimeterRatio", targetType) # can be targetType or manually input each easement name as a separate string.
+
+mean_nn_pos_size_ha <- load_per_easement(filename = "densityPOS_mean_nn_size_sqm", targetType) %>% # can be targetType or manually input each easement name as a separate string.
+  mutate(mean_nn_size = mean_nn_size/10000) %>% 
+  rename(mean_nn_size_ha = mean_nn_size)
+  
+dwelling_density <-  read_parquet(
+  file.path(infile, "modelVariables", "dwellingDensity_perHectare.parquet")) %>%
+  mutate(area_name = name_map[lgaName25]) %>% 
+  dplyr::select(-c(lgaName25))
+
+pct_change_habitat <- read_parquet(
+  file.path(infile, "modelVariables", "pct_change_habitat.parquet")) %>% 
+  dplyr::select(!delta_total_area_ha)
+
+# scale variables
+
+total_habitat_change$delta_total_area_ha <- scale(total_habitat_change$delta_total_area_ha)
+delta_eff_mesh$baseline_eff_mesh <- scale(delta_eff_mesh$baseline_eff_mesh)
+ease_ap_ratio$area_to_perimeter <- scale(ease_ap_ratio$area_to_perimeter)
+mean_nn_pos_size_ha$mean_nn_size_ha <- scale(mean_nn_pos_size_ha$mean_nn_size_ha)
+dwelling_density$dwellingPerHect <- scale(dwelling_density$dwellingPerHect)
+pct_change_habitat$pct_change_hab <- scale(pct_change_habitat$pct_change_hab)
+
+# 4. Create master dfs -----------------------------------------------------
+
+df <- left_join(delta_eff_mesh, total_habitat_change, by= c("area_name", "targetSpecies", "targetType", "scenario")) %>% 
+  left_join(ease_ap_ratio, by = c("area_name", "targetType")) %>% 
+  left_join(mean_nn_pos_size_ha, by = c("area_name", "targetType")) %>% 
+  left_join(dwelling_density, by = c("area_name")) %>% 
+  left_join(pct_change_habitat, by = c("area_name", "targetType", "targetSpecies", "scenario")) %>%
+  filter(targetType %in% targetType) %>% 
+  mutate(
+    scenario = factor(scenario, levels = c("baseline", "zeroHab", "5", "20", "50", "fullHab"
+    )),
+    targetType = factor(targetType, levels = c(
+      "utilAndRail",
+      "rail",
+      "util"
+    ))
+  )
+
+df_bird <- df %>% 
+  filter(targetSpecies == "bird")
+
+df_pol <- df %>% 
+  filter(targetSpecies == "pollinator")
+
+df_liz <- df %>% 
+  filter(targetSpecies == "lizard")
+
