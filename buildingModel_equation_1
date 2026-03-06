@@ -1,0 +1,32 @@
+library(pacman)
+
+p_load(tidyverse, lme4, lmerTest)
+
+# 1. Establish recuring variables ------------------------------------------------
+
+base_path <- "[insert_filepath]"
+source(file.path(base_path,
+                 "scripts",
+                 "data_prep_equation_1_and_2.R"))
+
+# 2. Build model ----------------------------------------------------------
+
+m_bird <- lmer(delta_eff_mesh ~ pct_change_hab
+               * targetType
+               + (1|area_name),
+               data = df_bird)
+
+m_pol <- lmer(delta_eff_mesh ~ pct_change_hab
+              * targetType
+              + (1|area_name),
+              data = df_pol)
+
+m_liz <- lmer(delta_eff_mesh ~ pct_change_hab
+              * targetType
+              + (1|area_name),
+              data = df_liz)
+
+summary(m_bird)
+summary(m_pol)
+summary(m_liz)
+
